@@ -1,0 +1,69 @@
+{
+  "name": "dsh-expert-team",
+  "version": "1.0.0",
+  "description": "Expert team workflow for DeepSeek Harness: goal-only dispatcher, self-assembled experts, task dispatch, per-assistant model selection, and a live status/event tree. 专家团队工作流：只给调度师目标，自动组队、派发、选模型，事件树显示运行/阻塞/停止/废弃状态。",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "test/*.mjs"
+  ],
+  "scripts": {
+    "test": "node test/host-smoke.mjs && node test/event-smoke.mjs && node test/model-smoke.mjs"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "deepseek",
+    "agent-team",
+    "multi-agent",
+    "workflow",
+    "expert-team",
+    "dispatcher"
+  ],
+  "author": "3493750852",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/3493750852/dsh-expert-team.git"
+  },
+  "homepage": "https://github.com/3493750852/dsh-expert-team#readme",
+  "bugs": {
+    "url": "https://github.com/3493750852/dsh-expert-team/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-workspace"
+      ]
+    }
+  }
+}

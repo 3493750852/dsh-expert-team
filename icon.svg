@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="Expert team">
+  <defs>
+    <linearGradient id="dset-bg" x1="8" y1="6" x2="56" y2="58" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3B82F6"/>
+      <stop offset="1" stop-color="#1D4ED8"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="15" fill="url(#dset-bg)"/>
+  <path d="M32 22v8M32 30 18 43M32 30l14 13" fill="none" stroke="#DBEAFE" stroke-width="2.4" stroke-linecap="round"/>
+  <circle cx="32" cy="17" r="7" fill="#FFFFFF"/>
+  <circle cx="15" cy="46" r="5.3" fill="#FFFFFF" fill-opacity="0.94"/>
+  <circle cx="32" cy="47" r="5.3" fill="#FFFFFF" fill-opacity="0.94"/>
+  <circle cx="49" cy="46" r="5.3" fill="#FFFFFF" fill-opacity="0.94"/>
+  <circle cx="32" cy="17" r="3.2" fill="#1D4ED8"/>
+  <circle cx="15" cy="46" r="2.1" fill="#1D4ED8"/>
+  <circle cx="32" cy="47" r="2.1" fill="#1D4ED8"/>
+  <circle cx="49" cy="46" r="2.1" fill="#1D4ED8"/>
+</svg>
