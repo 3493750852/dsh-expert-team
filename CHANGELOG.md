@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.1.0 — 2026-11-14
+## 1.1.1 — 2026-11-14
 
 - Ordinary conversations can no longer assemble a team on their own: a Host team gate (`expert-team/gate`) rejects `spawn_teammate`, `expert_team_open`, `team_task_create`, `team_task_update`, and the team-member forms of `send_message` / `interrupt_agent`.
 - The gate stays open only for a real expert-team session (the preset chosen at creation or the user's own kickoff message).

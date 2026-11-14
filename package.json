@@ -1,6 +1,6 @@
 {
   "name": "dsh-expert-team",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Expert team workflow for DeepSeek Harness: goal-only dispatcher, self-assembled experts, task dispatch, per-assistant model selection, and a live status/event tree. 专家团队工作流：只给调度师目标，自动组队、派发、选模型，事件树显示运行/阻塞/停止/废弃状态。",
   "type": "module",
   "main": "index.js",
