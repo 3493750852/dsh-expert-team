@@ -35,8 +35,23 @@ const DEFAULTS = {
 const MUTATING_TOOLS = new Set(['write', 'edit', 'apply_patch', 'bash', 'pwsh'])
 const SECTION_NAME = 'expert-team/dispatcher'
 const SECTION_ORDER = 120
+const GATE_SECTION_NAME = 'expert-team/gate'
+/** After TEAM_POLICY (600), so the ordinary-session rule is the last word. */
+const GATE_SECTION_ORDER = 700
 const LEDGER_VERSION = 1
 const MAX_MESSAGES_PER_TEAM = 300
+/** Team creation and the shared task board are Lead-only team actions. */
+const TEAM_GATE_TOOLS = new Set([
+  'spawn_teammate',
+  'expert_team_open',
+  'team_task_create',
+  'team_task_update',
+])
+/** Same tool names, but only their team form (a `target` member) is gated. */
+const TEAM_GATE_TARGET_TOOLS = new Set(['send_message', 'interrupt_agent'])
+const TEAM_GATE_DENIAL =
+  '当前会话是普通对话，未开启专家团队：助手不能自行组建团队，也不能使用团队任务板或团队消息。' +
+  '如果用户确实需要多助手协作，请提示用户点击输入框工具栏里的「专家团队」按钮（拉起专家团队）由用户主动开启，然后继续。'
 
 /**
  * Read and normalize the bundle row config.
@@ -248,6 +263,24 @@ function buildDispatcherPrompt(goal, members, closed) {
   ]
     .filter(Boolean)
     .join('\n')
+}
+
+/**
+ * The ordinary-session rule: the team tools exist in every Lead scope, so an
+ * ordinary conversation must state plainly that they are closed unless the user
+ * takes the explicit enable action. The Host guard is the enforcement; this
+ * section keeps the model from trying in the first place.
+ * @returns The gate prompt section text.
+ */
+function buildGatePrompt() {
+  return [
+    '当前会话是普通对话，不是专家团队会话。',
+    '用户没有在创建会话时选择「专家团队」，也没有主动开启团队，因此团队能力对你关闭：',
+    '- 不要调用 spawn_teammate、expert_team_open：这些调用会被 Host 直接拒绝；',
+    '- 不要创建或修改团队任务板（team_task_create、team_task_update），也不要向其他成员发送团队消息；',
+    '- 所有工作由你本人完成；可以用 subagent / subagent_fork 做一次性委派，它们不属于团队。',
+    '如果用户明确需要多助手团队协作，告诉用户点击输入框工具栏里的「专家团队」按钮（拉起专家团队），由用户主动开启；不要自行开启，也不要绕过上述限制。',
+  ].join('\n')
 }
 
 /**
@@ -708,6 +741,7 @@ export function apply(ctx, config) {
   const ledgerFile = path.join(home, '.dsh-expert-team', 'ledger.json')
   const ledger = loadLedger(ledgerFile)
   const dispatcherStates = new Map()
+  const gateStates = new Map()
   const scannedSessions = new Set()
   let ledgerSeq = Number(ledger.seq) || 0
   let saveTimer = null
@@ -1002,6 +1036,98 @@ export function apply(ctx, config) {
       return true
     }
     return false
+  }
+
+  /** @param {string} leadId */
+  function disposeDispatcher(leadId) {
+    const state = dispatcherStates.get(leadId)
+    if (!state) return
+    dispatcherStates.delete(leadId)
+    try {
+      state.dispose()
+    } catch {
+      // The Agent context may already be unwinding.
+    }
+  }
+
+  /** @param {string} leadId */
+  function disposeTeamGate(leadId) {
+    const state = gateStates.get(leadId)
+    if (!state) return
+    gateStates.delete(leadId)
+    try {
+      state.dispose()
+    } catch {
+      // The Agent context may already be unwinding.
+    }
+  }
+
+  /**
+   * Close team creation in an ordinary conversation. Every root Agent is an
+   * implicit Team Lead, so the shipped team tools are installed in ordinary
+   * sessions too; without this guard an ordinary assistant can assemble a team
+   * on its own. The gate is lifted only for a real expert-team session (the
+   * preset chosen at creation, the user's kickoff message, or a team that
+   * already exists) and it replaces any stale dispatcher capabilities.
+   * @param {{ id: string, ctx?: any, session?: any }} agent
+   */
+  function ensureTeamGate(agent) {
+    if (!agent?.ctx) return
+    const membership = membershipOf(agent.id)
+    if (!membership || membership.role !== 'lead') return
+    const leadId = String(agent.id)
+    if (isExpertMode(agent, membersOf(agent))) {
+      disposeTeamGate(leadId)
+      return
+    }
+    disposeDispatcher(leadId)
+    if (gateStates.has(leadId)) return
+
+    const prompt = agent.ctx.systemPrompt
+    const tools = agent.ctx.tools
+    if (!prompt?.section || !tools?.guard) return
+
+    let dispose
+    try {
+      dispose = agent.ctx.effect(() => {
+        const offSection = prompt.section({
+          name: GATE_SECTION_NAME,
+          order: GATE_SECTION_ORDER,
+          interpolate: false,
+          text: buildGatePrompt(),
+        })
+        const offGuard = tools.guard((execution) => {
+          if (!execution || typeof execution.name !== 'string') return undefined
+          if (execution.agent && String(execution.agent.id) !== leadId) return undefined
+          if (TEAM_GATE_TOOLS.has(execution.name)) return TEAM_GATE_DENIAL
+          if (TEAM_GATE_TARGET_TOOLS.has(execution.name)) {
+            const args = toolArguments(execution)
+            const target = typeof args.target === 'string' ? args.target.trim() : ''
+            // The global subagent `send_message` takes `agent_id`, not a member
+            // target, so it stays available for one-shot delegation.
+            if (target) return TEAM_GATE_DENIAL
+          }
+          return undefined
+        })
+        return () => {
+          try {
+            offGuard?.()
+          } catch {
+            // Already gone.
+          }
+          try {
+            offSection?.()
+          } catch {
+            // Already gone.
+          }
+        }
+      }, 'dsh-expert-team.teamGate()')
+    } catch (error) {
+      log('could not install the team gate: %o', error)
+      return
+    }
+    if (typeof dispose === 'function') gateStates.set(leadId, { dispose })
+    else dispose?.()
   }
 
   /**
@@ -1497,6 +1623,7 @@ export function apply(ctx, config) {
     queueMicrotask(() => {
       try {
         ensureDispatcher(agent)
+        ensureTeamGate(agent)
       } catch (error) {
         log('could not restore the dispatcher on agent creation: %o', error)
       }
@@ -1504,14 +1631,17 @@ export function apply(ctx, config) {
   })
 
   ctx.on('agent/disposed', ({ agent }) => {
-    const state = dispatcherStates.get(String(agent?.id))
-    if (!state) return
+    const leadId = String(agent?.id)
     try {
-      state.dispose()
+      const state = dispatcherStates.get(leadId)
+      if (state) {
+        state.dispose()
+        dispatcherStates.delete(leadId)
+      }
     } catch {
       // The Agent context may already be unwinding.
     }
-    dispatcherStates.delete(String(agent?.id))
+    disposeTeamGate(leadId)
   })
 
   // ---------------------------------------------------------------------
@@ -1530,6 +1660,7 @@ export function apply(ctx, config) {
         scheduleSave()
       }
       ensureDispatcher(payload?.agent)
+      ensureTeamGate(payload?.agent)
     } catch (error) {
       log('expert-team kickoff failed: %o', error)
     }
@@ -1566,6 +1697,8 @@ export function apply(ctx, config) {
               sendJson(res, 200, {
                 ok: true,
                 mode: row?.mode || '',
+                /** Present when team creation is closed for this ordinary session. */
+                teamGate: gateStates.has(sessionId),
                 goal: row?.goal || '',
                 messages: Array.isArray(row?.messages) ? row.messages.slice(-120) : [],
                 events: Array.isArray(row?.events) ? row.events.slice(-200) : [],
@@ -1623,6 +1756,14 @@ export function apply(ctx, config) {
         }
       }
       dispatcherStates.clear()
+      for (const state of gateStates.values()) {
+        try {
+          state.dispose()
+        } catch {
+          // Already gone.
+        }
+      }
+      gateStates.clear()
       if (saveTimer !== null) {
         clearTimeout(saveTimer)
         saveTimer = null
@@ -1632,5 +1773,5 @@ export function apply(ctx, config) {
     'dsh-expert-team: flush ledger',
   )
 
-  log('ready (provider=%s)', options.freshProvider)
+  log('ready (provider=%s, teamGate=on)', options.freshProvider)
 }

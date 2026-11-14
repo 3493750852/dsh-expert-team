@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Expert team",
-    "description": "Pick Expert team for a new session and just give the dispatcher the goal. It evaluates the work, assembles the team itself, and may open new experts, deprecate old ones, temporarily stop them, and compact context. The event tree shows running, blocked/waiting, temporarily stopped, and deprecated states; click an expert to open its session and chat directly. The user always outranks the dispatcher."
+    "description": "Pick Expert team for a new session and just give the dispatcher the goal. It evaluates the work, assembles the team itself, and may open new experts, deprecate old ones, temporarily stop them, and compact context. Ordinary conversations keep team creation closed: the assistant cannot assemble a team on its own, and only the user's own Enable expert team action or the Expert team preset opens it. The event tree shows running, blocked/waiting, temporarily stopped, and deprecated states; click an expert to open its session and chat directly. The user always outranks the dispatcher."
   }
 }

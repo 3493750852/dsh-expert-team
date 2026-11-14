@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.0 — 2026-11-14
+
+- Ordinary conversations can no longer assemble a team on their own: a Host team gate (`expert-team/gate`) rejects `spawn_teammate`, `expert_team_open`, `team_task_create`, `team_task_update`, and the team-member forms of `send_message` / `interrupt_agent`.
+- The gate stays open only for a real expert-team session (the preset chosen at creation or the user's own kickoff message).
+- Added a compact 「专家团队」 button in the composer tool row of ordinary conversations; the user opens the goal card and submits it to enable the team. The assistant cannot do this for the user.
+- Non-team work is untouched: file writes, shell commands, and one-shot `subagent` / `subagent_fork` delegation still work, and the subagent `send_message` form (`agent_id`) is not gated.
+- `GET /dsh-expert-team/ledger` now reports `teamGate` for the session.
+- Added `test/gate-smoke.mjs`.
+
 ## 1.0.0 — 2026-11-13
 
 - Initial public release.

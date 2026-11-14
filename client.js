@@ -70,6 +70,9 @@ window.__ModuleLoader__.load({
       expand: '展开',
       collapse: '收起',
       ledgerUnavailable: '暂时读不到通信记录，任务板仍然可用。',
+      pullTitle: '拉起专家团队',
+      pullHint: '当前是普通对话，助手不会自行组建团队。点击这里由你主动开启。',
+      pullButton: '专家团队',
     }
 
     const en = {
@@ -136,6 +139,9 @@ window.__ModuleLoader__.load({
       expand: 'Expand',
       collapse: 'Collapse',
       ledgerUnavailable: 'Communication history is unavailable; the task board still works.',
+      pullTitle: 'Enable expert team',
+      pullHint: 'This is an ordinary conversation: the assistant will not assemble a team on its own. Click here to enable it yourself.',
+      pullButton: 'Expert team',
     }
 
     function buildKickoff(goal) {
@@ -205,6 +211,39 @@ window.__ModuleLoader__.load({
         }
       }, [sessionId, active])
       return { ledger, unavailable }
+    }
+
+    // The compact composer button and the goal card live in two different
+    // slots, so the card's open state is shared here instead of in one
+    // component's local state.
+    const setupOpenBySession = new Map()
+    const setupOpenListeners = new Set()
+
+    function setSetupOpenForSession(sessionId, next) {
+      if (!sessionId) return
+      const current = setupOpenBySession.get(sessionId) === true
+      const value = typeof next === 'function' ? next(current) : next
+      if (value === current) return
+      if (value) setupOpenBySession.set(sessionId, true)
+      else setupOpenBySession.delete(sessionId)
+      for (const listener of setupOpenListeners) listener()
+    }
+
+    function subscribeSetupOpen(listener) {
+      setupOpenListeners.add(listener)
+      return () => setupOpenListeners.delete(listener)
+    }
+
+    function useSetupOpen(sessionId) {
+      const open = React.useSyncExternalStore(
+        subscribeSetupOpen,
+        () => (sessionId ? setupOpenBySession.get(sessionId) === true : false),
+      )
+      const setOpen = React.useCallback(
+        (next) => setSetupOpenForSession(sessionId, next),
+        [sessionId],
+      )
+      return [open, setOpen]
     }
 
     function formatTime(at) {
@@ -786,6 +825,37 @@ window.__ModuleLoader__.load({
       )
     }
 
+    function ExpertTeamButton(props) {
+      const { sessionId, useSession, useSessions, t } = props
+      const leadSessionId =
+        useSession((snapshot) => snapshot?.subagent?.address?.parentSessionId) || sessionId
+      const team = useSessions(
+        (state) => state?.projectionsBySession?.[leadSessionId]?.values?.agentTeam,
+      )
+      const preset = useSessions(
+        (state) => state?.byId?.[leadSessionId]?.projectionValues?.agentPreset,
+      )
+      const blank = useSession((snapshot) => snapshot?.blank)
+      const [setupOpen, setSetupOpen] = useSetupOpen(leadSessionId)
+      const members = Array.isArray(team?.members) ? team.members : []
+      const tasks = Array.isArray(team?.tasks) ? team.tasks : []
+      const teamActive = members.length > 1 || tasks.length > 0
+      if (teamActive || blank !== false || preset === 'expert-team') return null
+      return h(
+        'button',
+        {
+          type: 'button',
+          className: setupOpen ? 'dset_pill dset_pillActive' : 'dset_pill',
+          title: t('pullHint'),
+          'aria-label': t('pullTitle'),
+          'aria-expanded': setupOpen,
+          onClick: () => setSetupOpen((value) => !value),
+        },
+        h('span', { className: 'dset_pillIcon' }, icon(14)),
+        h('span', { className: 'dset_pillLabel' }, t('pullButton')),
+      )
+    }
+
     function ExpertTeamDock(props) {
       const { sessionId, useSession, useSessions, useSessionStatus, inputActions, onOpenMember, t } = props
       const leadSessionId =
@@ -799,7 +869,7 @@ window.__ModuleLoader__.load({
       const members = Array.isArray(team?.members) ? team.members : []
       const tasks = Array.isArray(team?.tasks) ? team.tasks : []
       const teamActive = members.length > 1 || tasks.length > 0
-      const [setupOpen, setSetupOpen] = React.useState(false)
+      const [setupOpen, setSetupOpen] = useSetupOpen(leadSessionId)
       const [expanded, setExpanded] = React.useState(true)
       const [submitting, setSubmitting] = React.useState(false)
       const [error, setError] = React.useState('')
@@ -891,6 +961,9 @@ window.__ModuleLoader__.load({
         )
       }
 
+      // Ordinary conversation: the assistant may not assemble a team here.
+      // The compact button in the composer tool row is the user's own entry;
+      // this dock only hosts the goal card it opens.
       return null
     }
 
@@ -905,6 +978,24 @@ window.__ModuleLoader__.load({
         font-family: inherit;
       }
       .dset_icon { flex: 0 0 auto; display: block; }
+      .dset_pill {
+        display: inline-flex; align-items: center; gap: 4px; min-width: 0;
+        height: 26px; padding: 0 8px; border-radius: 7px;
+        border: 1px solid var(--dsw-alias-border-l1);
+        background: transparent; color: var(--dsw-alias-label-secondary);
+        font: inherit; font-size: 11.5px; cursor: pointer; white-space: nowrap;
+      }
+      .dset_pill:hover {
+        background: var(--dsw-alias-bg-layer-2);
+        color: var(--dsw-alias-label-primary);
+      }
+      .dset_pillActive {
+        border-color: var(--dsw-alias-brand-primary);
+        color: var(--dsw-alias-brand-primary);
+        background: color-mix(in srgb, var(--dsw-alias-brand-primary) 10%, transparent);
+      }
+      .dset_pillIcon { display: inline-flex; flex: 0 0 auto; color: var(--dsw-alias-brand-primary); }
+      .dset_pillLabel { overflow: hidden; text-overflow: ellipsis; }
       .dset_setup, .dset_panel {
         border: 1px solid var(--dsw-alias-border-l1);
         background: var(--dsw-alias-bg-layer-1);
@@ -1204,6 +1295,24 @@ window.__ModuleLoader__.load({
             ),
           ),
         'dsh-expert-team: composer dock',
+      )
+
+      // The user's own entry to open the goal card: a compact button inside
+      // the composer tool row, not a full-width bar above it.
+      ctx.effect(
+        () =>
+          ctx.slots.inject('conversation.input.left', () =>
+            ctx.slots.register(
+              {
+                name: 'conversation.input.left',
+                id: 'dsh-expert-team',
+                order: 15,
+                locale: NS,
+              },
+              (props) => h(ExpertTeamButton, { ...props, t }),
+            ),
+          ),
+        'dsh-expert-team: composer button',
       )
     }
 

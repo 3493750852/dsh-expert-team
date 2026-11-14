@@ -4,13 +4,27 @@
 
 ## 使用
 
-1. 新建会话，在 Agent preset 选择器里选择 **专家团队**。选中后输入框上方会出现目标卡片；这是唯一的入口，不再额外放重复的「专家团队」按钮。
+1. 新建会话，在 Agent preset 选择器里选择 **专家团队**。选中后输入框上方会出现目标卡片。普通对话里如果想让助手组建团队，不要让它自己开，而是由你点击输入框工具栏里的 **「专家团队」** 按钮（提示为「拉起专家团队」），填写目标并提交；助手无法代替你开启。
 2. 在目标卡片里填写**目标**，点击「开始评估并组建团队」。也可以直接在输入框里写目标，专家团队的调度师提示词同样生效。
 3. 调度师先给出一段分工计划，然后为每个助手调用 `expert_team_open`（可指定模型）或 `spawn_teammate`，用 `team_task_create` 建任务、用 `send_message` 按顺序派发。
 4. 输入框上方的**事件树**会实时显示每位助手的运行状态、当前任务、所用模型和最近事件；右侧是**派发序列**。
 5. 你随时可以介入：
    - 直接对调度师说「再开一个负责 X 的助手」「废弃 Y」「暂时停一下 Z」「压缩上下文」；
    - 或**点击事件树里的任意助手**，打开它的会话，看它到底做了什么，并直接对话。直接对话会唤醒它；如果它已被调度师废弃，你的直接消息会把它恢复。
+
+## 普通对话不会自行组建团队
+
+Agent Teams 的 `spawn_teammate`、`team_task_*` 等工具在 DSH 里对每个根 Agent 都可用。也就是说，**即使新建会话时没有选择专家团队，普通对话里的助手原本也有能力自己拉起一个团队**——这正是本插件要关掉的权限。
+
+- 普通会话会装上 Host 侧的**团队门禁**（`expert-team/gate`）：
+  - 拒绝 `spawn_teammate`、`expert_team_open`、`team_task_create`、`team_task_update`；
+  - 拒绝团队成员形式的 `send_message` / `interrupt_agent`（带 `target` 参数）；
+  - 不拦截文件写入、命令执行、`subagent` / `subagent_fork` 一次性委派，也不拦截子 Agent 形式的 `send_message`（带 `agent_id`）；
+  - 同时注入一条规则，明确告诉模型本会话不能组建团队，避免它反复尝试。
+- 只有两种方式解除门禁：
+  1. 创建会话时选择 **专家团队** 预设；
+  2. 用户主动在普通对话的输入框工具栏点击 **「专家团队」** 按钮，填写目标并提交（目标卡片发送的固定开场消息也会被识别为用户主动开启）。
+- 门禁只会因为**用户动作**解除。助手自己判断“这个任务适合开团队”不算，尝试调用会被 Host 直接拒绝，并提示用户去点击开启入口。
 
 ## 选择助手模型
 
@@ -73,22 +87,23 @@
 ## 工作流是怎么接起来的
 
 1. **Agent preset**：`专家团队` 把标准工具集装进会话，并加上团队角色前缀。选中它后，调度师提示词会在 Agent 创建/首步之前安装，即使还没有任何助手。
-2. **目标卡片**：浏览器半只收集目标，生成一条格式固定的用户消息：
+2. **团队门禁**：每个根 Agent 的首步都会判定本会话是不是专家团队。不是的话，Host 安装 `expert-team/gate` 规则和工具守卫，关闭团队创建；只有预设或用户主动开启才会移除。
+3. **目标卡片**：浏览器半只收集目标，生成一条格式固定的用户消息：
    ```
    专家团队初始化
    目标：
    ...
    请调度师先评估目标，决定需要哪些专家，自行创建助手并组建团队，然后建任务、按顺序派发。
    ```
-3. **Host 首步门**：`agent/pre-step` 识别这条消息，把会话标记为专家团队模式并安装：
+4. **Host 首步门**：`agent/pre-step` 识别这条消息，把会话标记为专家团队模式并安装：
    - 调度师 system prompt section（含用户更高权限、组队流程、开/废/停/压缩说明）；
    - 写工具守卫；
    - Lead-only 的 `expert_team_close` 与 `expert_team_compact`。
    插件**不会**替调度师预先创建助手——组队完全由调度师决定。
-4. **Agent Teams**：启用随 DSH 提供的 `@deepseek-ai/dsh-experimental-agent-team`、工具包和 Web UI。助手创建、任务板、点对点消息、等待都由官方 Team 协议完成。
-5. **Host 事件台账**：`session/event` 把用户干预、peer 消息、任务/成员事件、废弃/停止/压缩通知写入有界台账；`team/task` 完成时触发通知分发。
-6. **模型选择**：`expert_team_models` 从 Host `ctx.llm` 读取已配置的 provider/model；`expert_team_open` 预检后在 Agent 创建完成时调用其 `model.select()`，模型从下一次请求生效。
-7. **浏览器半**：从共享的 `agentTeam` Session projection 读取 roster 与任务板（无需轮询）；从只读路由 `/dsh-expert-team/ledger` 读取目标、事件、消息、待处理请求、废弃/停止标记和选中的模型（约 2.5 秒轮询一次）。点击助手节点通过 `uiWorkspace.openSession` 打开其 continuable 子会话。
+5. **Agent Teams**：启用随 DSH 提供的 `@deepseek-ai/dsh-experimental-agent-team`、工具包和 Web UI。助手创建、任务板、点对点消息、等待都由官方 Team 协议完成。
+6. **Host 事件台账**：`session/event` 把用户干预、peer 消息、任务/成员事件、废弃/停止/压缩通知写入有界台账；`team/task` 完成时触发通知分发。
+7. **模型选择**：`expert_team_models` 从 Host `ctx.llm` 读取已配置的 provider/model；`expert_team_open` 预检后在 Agent 创建完成时调用其 `model.select()`，模型从下一次请求生效。
+8. **浏览器半**：从共享的 `agentTeam` Session projection 读取 roster 与任务板（无需轮询）；从只读路由 `/dsh-expert-team/ledger` 读取目标、事件、消息、待处理请求、废弃/停止标记、选中的模型和门禁状态（约 2.5 秒轮询一次）。点击助手节点通过 `uiWorkspace.openSession` 打开其 continuable 子会话。
 
 ## 安装
 
@@ -133,6 +148,8 @@ git clone https://github.com/3493750852/dsh-expert-team.git
 - **共享工作目录**：所有助手共享同一个 cwd；写入范围只是提示，不是锁。调度师需要在任务里写清允许触及的路径，并在最后检查 diff/测试结果。
 - **压缩的服务归属**：`expert_team_compact` 使用目标 Agent 自己的 preset 侧 `compaction` 服务；没有 compaction 的 preset 会返回明确错误。
 - **事件台账是显示缓存**：完整对话仍以各 Session 日志为准；本插件保留每队最多 400 条事件、300 条消息、每条最多 1200 字。
+- **门禁是 Host 工具守卫**：团队工具本身仍会出现在普通会话的可用工具列表里（Host 无法按 Agent 卸载其他插件注册的 Agent 作用域工具），但团队创建/任务板/团队消息调用会被明确拒绝；规则 section 同时提醒模型不要尝试。
+- **门禁只认用户动作**：助手在普通对话里判断“这个任务适合开团队”不会解除门禁；必须由用户用「专家团队」按钮打开目标卡片并提交，或在创建会话时选择专家团队预设。
 - **页面刷新**：客户端插件是安装包里的静态 bundle；Host 重载后不一定自动替换已加载的浏览器模块，刷新页面最稳。
 
 ## 文件
@@ -140,11 +157,12 @@ git clone https://github.com/3493750852/dsh-expert-team.git
 | 文件 | 作用 |
 |---|---|
 | `cordis.patch.yml` | 启用 Team 服务/工具/UI，插入 Host 插件与 `专家团队` preset |
-| `index.js` | 目标门、调度师 prompt/守卫、开助手/选模型、废弃/压缩工具、事件台账、完成通知、ledger 路由 |
-| `client.js` | 目标卡片、事件树（状态色/事件/点击进会话）、派发序列 |
+| `index.js` | 目标门、普通会话团队门禁、调度师 prompt/守卫、开助手/选模型、废弃/压缩工具、事件台账、完成通知、ledger 路由 |
+| `client.js` | 目标卡片、普通会话输入框工具栏的「专家团队」按钮、事件树（状态色/事件/点击进会话）、派发序列 |
 | `test/host-smoke.mjs` | 目标解析、调度师 section、写守卫、废弃、压缩、preset 检测 |
 | `test/event-smoke.mjs` | 完成通知、暂时停止/恢复、用户恢复废弃助手、事件台账 |
 | `test/model-smoke.mjs` | 模型目录、指定模型、默认回退、无 LLM 服务 |
+| `test/gate-smoke.mjs` | 普通会话门禁、非团队工具放行、目标卡片解除门禁、预设/助手不装门禁 |
 | `locale/*.json` | 插件页标题与说明 |
 
 ## 验证
@@ -155,7 +173,7 @@ node --check client.js
 npm test
 ```
 
-`npm test` 会依次跑 Host、事件通知、模型选择三个 smoke test。浏览器视觉验证需要在已登录的 DSH 页面刷新后确认；当前验证覆盖 JavaScript 语法、manifest/插槽注册和 Host 工作流冒烟测试。
+`npm test` 会依次跑 Host、事件通知、模型选择、团队门禁四个 smoke test。浏览器视觉验证需要在已登录的 DSH 页面刷新后确认；当前验证覆盖 JavaScript 语法、manifest/插槽注册和 Host 工作流冒烟测试。
 
 ## License
 
